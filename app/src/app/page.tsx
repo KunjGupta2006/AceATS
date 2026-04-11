@@ -203,7 +203,7 @@ router.push("/results");
             <button
               onClick={() => handleAction("/analyze")}
               disabled={!file || isLoading !== null}
-              className="flex items-center justify-center gap-2 py-3 px-4 bg-zinc-900 border border-zinc-800 text-zinc-100 font-bold rounded-xl hover:bg-zinc-800 transition-all disabled:opacity-30">
+              className="flex items-center justify-center gap-2 py-3 px-4 bg-blue-600 border border-zinc-800 text-zinc-100 font-bold rounded-xl hover:bg-sky-500 transition-all disabled:opacity-80">
               {isLoading === "/analyze" ? <Loader2 className="w-4 h-4 animate-spin" /> : <BarChart3 className="w-4 h-4" />}
               Analyze
             </button>
@@ -211,7 +211,7 @@ router.push("/results");
             <button
               onClick={() => handleAction("/checkats")}
               disabled={!file || !jobDescription || isLoading !== null}
-              className="flex items-center justify-center gap-2 py-3 px-4 bg-zinc-900 border border-zinc-800 text-zinc-100 font-bold rounded-xl hover:bg-zinc-800 transition-all disabled:opacity-30">
+              className="flex items-center justify-center gap-2 py-3 px-4 bg-zinc-800 border border-zinc-800 text-zinc-100 font-bold rounded-xl hover:bg-zinc-600 transition-all disabled:opacity-80">
               {isLoading === "/checkats" ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
               Check ATS
             </button>
@@ -219,7 +219,7 @@ router.push("/results");
             <button
               onClick={() => handleAction("/full-analysis")}
               disabled={!file || !jobDescription || isLoading !== null}
-              className="flex items-center justify-center gap-2 py-3 px-4 bg-zinc-100 text-black font-bold rounded-xl hover:bg-zinc-300 transition-all shadow-lg disabled:opacity-30">
+              className="flex items-center justify-center gap-2 py-3 px-4 bg-zinc-200 text-black font-bold rounded-xl hover:bg-zinc-50 transition-all shadow-lg disabled:opacity-80">
               {isLoading === "/full-analysis" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
               Full Analysis
             </button>
