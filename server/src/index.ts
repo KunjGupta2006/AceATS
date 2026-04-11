@@ -6,6 +6,7 @@ import fs from "fs/promises";
 import mammoth from "mammoth";
 import Groq from "groq-sdk";
 import dotenv from "dotenv";
+import cors from "cors";
 const pdfModule = require("pdf-parse");
 const pdf = pdfModule.default || pdfModule;
 dotenv.config();
@@ -13,6 +14,8 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 8080;
 
+// ================== MIDDLEWARE ==================
+app.use(cors());
 app.use(express.json());
 
 // ================== GROQ SETUP ==================
@@ -75,9 +78,6 @@ const extractTextFromFile = async (
 ): Promise<string> => {
   if (mimeType === "application/pdf") {
     const buffer = await fs.readFile(filePath);
-    //LOGGING----------------------------------------------------------------------------------------------------------
-    console.log("PDF TYPE:", typeof pdf);
-    console.log("PDF VALUE:", pdf);
     const data = await pdf(buffer);
     return data.text;
   }
@@ -156,67 +156,83 @@ const analyzeResumeWithAI = async (
   resumeText: string,
   jobDescription?: string
 ) => {
-const prompt = `
-You extract structured data from resumes.
+  const prompt = `
+You are an expert resume parser and career analyst with 15+ years of experience in technical recruiting and talent acquisition. Your task is to extract and analyze structured data from the provided resume with surgical precision.
 
-Rules:
-- Use ONLY information present in the resume
-- Do NOT infer or guess
-- Do NOT add skills or experience not explicitly mentioned
-- check for name usually in the first line,and check for contact details also.
-- Return ONLY valid JSON.Do NOT wrap in markdown.Do NOT add any text before or after JSON.
+EXTRACTION RULES:
+- Extract ONLY information explicitly present in the resume text
+- Do NOT infer, hallucinate, or add anything not directly stated
+- Preserve exact terminology used by the candidate (e.g. "React.js" not "React")
+- For links: extract ALL URLs including mailto:, linkedin.com, github.com, portfolio sites, and any hyperlinked text
+- For name: look at the very first line or topmost prominent text
+- For contact: scan for phone numbers, emails, LinkedIn, GitHub, location
+- For experience: include role title + company + duration if present
+- For skills: include programming languages, frameworks, tools, platforms, methodologies
+- Return ONLY raw valid JSON. No markdown. No backticks. No explanation. No text before or after.
 
-Resume:
+RESUME:
 ${resumeText}
 
-${jobDescription ? `Job:
-${jobDescription}` : ""}
+${jobDescription ? `TARGET JOB DESCRIPTION:\n${jobDescription}` : ""}
 
-Output:
+OUTPUT SCHEMA:
 {
-  "skills": string[],        // tools, tech, languages explicitly listed
-  "education": string[],     // degrees, colleges
-  "experience": string[],    // roles with company names if present
-  "links": string[],         // URLs only also add hidden links
-  "certifications": string[],
-  "summary": string          // 2-3 lines based ONLY on resume
-  "improvements":string // 2-3 main points to improve the resume
+  "name": string,                  // full name from top of resume, empty string if not found
+  "contact": {
+    "email": string,               // email address or empty string
+    "phone": string,               // phone number or empty string
+    "location": string             // city/country or empty string
+  },
+  "links": string[],               // ALL URLs, emails as mailto, LinkedIn, GitHub, portfolio
+  "skills": string[],              // every explicitly listed tool, language, framework, platform
+  "education": string[],           // format: "Degree, Institution, Year" — only what is stated
+  "experience": string[],          // format: "Role at Company (Duration)" — only what is stated
+  "certifications": string[],      // certifications or courses explicitly listed, empty array if none
+  "summary": string,               // 2-3 sentence professional summary derived STRICTLY from resume content
+  "improvements": string[],        // exactly 3 specific, actionable resume improvement suggestions
+  "suggestedRoles": string[],      // 4-6 job titles that match the candidate's demonstrated skill set
+  "experienceLevel": string        // "Fresher" | "Junior" | "Mid-Level" | "Senior" | "Lead/Principal"
 }
 `;
 
   return callGroq(prompt);
 };
 
+
 const calculateATSScore = async (
   resumeText: string,
   jobDescription: string
 ) => {
-const prompt = `
-You are an ATS matcher.
+  const prompt = `
+You are a senior ATS (Applicant Tracking System) engine and technical recruiter with deep expertise in resume-to-job matching. Your scoring must reflect how a real ATS system would evaluate this candidate.
 
-Rules:
-- Compare resume vs job strictly
-- Match ONLY exact or clearly equivalent skills
-- Do NOT assume missing skills
-- Be conservative in scoring
-- Return ONLY valid JSON.Do NOT wrap in markdown.Do NOT add any text before or after JSON.
--Important: Extract required skills from related Job first, then compare.
+SCORING METHODOLOGY:
+1. First, extract ALL required and preferred skills, tools, qualifications, and keywords from the job description
+2. Categorize them as: REQUIRED (must-have) vs PREFERRED (nice-to-have)
+3. Scan the resume for exact matches and clearly equivalent terms (e.g. "Node" = "Node.js", "Mongo" = "MongoDB")
+4. Weight required skills more heavily than preferred skills
+5. Penalize for missing required qualifications
+6. Be conservative — do NOT award points for vague or implied matches
+7. Return ONLY raw valid JSON. No markdown. No backticks. No explanation. No text before or after.
 
-Resume:
+RESUME:
 ${resumeText}
 
-Job:
+JOB DESCRIPTION:
 ${jobDescription}
 
-Output:
+OUTPUT SCHEMA:
 {
-  "score": number,                 // 0-100 strict match %
-  "matchedKeywords": string[],     // exact matches and all skill based keywords used
-  "missingKeywords": string[],     // important job skills not found
-  "feedback": string              // short actionable improvements
+  "score": number,                    // 0-100 integer. 90-100: exceptional, 70-89: strong, 50-69: moderate, below 50: weak
+  "matchedKeywords": string[],        // skills/tools/qualifications found in BOTH resume and job description
+  "missingKeywords": string[],        // important skills from the job description absent in the resume,do not take missing skills that are present in resume
+  "requiredMissing": string[],        // subset of missingKeywords that are explicitly REQUIRED in the job
+  "preferredMissing": string[],       // subset of missingKeywords that are PREFERRED but not required
+  "verdict": string,                  // one of: "Strong Match" | "Good Match" | "Partial Match" | "Weak Match"
+  "feedback": string,                 // 2-3 sentences: what's working, what's missing, one concrete action to improve
+  "keywordDensity": number            // % of job keywords found in resume, 0-100 integer
 }
-  -do not add skills missingkeywords for a job
-  `;
+`;
 
   return callGroq(prompt);
 };
@@ -267,20 +283,41 @@ app.post("/userresume", upload.single("resume"), async (req, res) => {
   }
 });
 
-// ANALYZE
+// ANALYZE (Job Description is optional here)
 app.post("/analyze", async (req, res) => {
   try {
-    
     const { resumeText, jobDescription } = req.body;
-    if (typeof jobDescription !== "string") {
-      return res.status(400).json({ error: "Invalid jobDescription" });
-    }
-    if (typeof resumeText !== "string") {
-      return res.status(400).json({ error: "Invalid resumeText" });
+    
+    // Validate resumeText
+    if (typeof resumeText !== "string" || !resumeText.trim()) {
+      return res.status(400).json({ error: "Valid resumeText is required" });
     }
 
-    const data = await analyzeResumeWithAI(resumeText,jobDescription);
+    // jobDescription is optional for basic analysis, but if provided, validate it
+    const cleanJobDesc = typeof jobDescription === "string" ? jobDescription.trim() : undefined;
 
+    const data = await analyzeResumeWithAI(resumeText, cleanJobDesc);
+    res.json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "Analysis failed",
+    });
+  }
+});
+
+// CHECK ATS 
+app.post("/checkats", async (req, res) => {
+  try {
+    const { resumeText, jobDescription } = req.body;
+    
+    if (typeof resumeText !== "string" || !resumeText.trim()) {
+      return res.status(400).json({ error: "Valid resumeText is required" });
+    }
+    if (typeof jobDescription !== "string" || !jobDescription.trim()) {
+      return res.status(400).json({ error: "Valid jobDescription is required for ATS Check" });
+    }
+
+    const data = await calculateATSScore(resumeText, jobDescription.trim());
     res.json({ success: true, data });
   } catch (error) {
     res.status(500).json({
@@ -294,15 +331,20 @@ app.post("/full-analysis", async (req, res) => {
   try {
     const { resumeText, jobDescription } = req.body;
 
-    if (typeof resumeText !== "string" || typeof jobDescription !== "string")  {
-      return res.status(400).json({
-        error: "Resume and job description required",
-      });
+    if (typeof resumeText !== "string" || !resumeText.trim()) {
+      return res.status(400).json({ error: "Valid resumeText is required" });
+    }
+    
+    if (typeof jobDescription !== "string" || !jobDescription.trim()) {
+      return res.status(400).json({ error: "Valid jobDescription is required for Full Analysis" });
     }
 
+    const cleanResumeText = resumeText.trim();
+    const cleanJobDesc = jobDescription.trim();
+
     const [analysis, ats] = await Promise.all([
-      analyzeResumeWithAI(resumeText, jobDescription),
-      calculateATSScore(resumeText, jobDescription),
+      analyzeResumeWithAI(cleanResumeText, cleanJobDesc),
+      calculateATSScore(cleanResumeText, cleanJobDesc),
     ]);
 
     res.json({
@@ -320,7 +362,6 @@ app.post("/full-analysis", async (req, res) => {
 
 app.use(
   (err: Error, _req: Request, res: Response, _next: NextFunction) => {
-
     res.status(500).json({
       error: err.message || "Internal server error",
     });
